@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
+	_ "github.com/lib/pq" //import postgres driver
 )
 
 // DBConfig hold the database connection values
@@ -30,18 +32,27 @@ func configString(name string) string {
 	return os.Getenv(name)
 }
 
-func (db *DBConfig) dcs() string {
-	return fmt.Sprintf("%s:%s@tcp(%s)/%s", db.User, db.Password, db.Host, db.Name)
+func (db *DBConfig) dcs(connectionType string) string {
+	if connectionType == "postgres" {
+		return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+			db.Host, db.Port, db.User, db.Password, db.Name)
+	} else if connectionType == "mysql" {
+		return fmt.Sprintf("%s:%s@tcp(%s)/%s", db.User, db.Password, db.Host, db.Name)
+	}
+	return ""
 }
 
-func (db *DBConfig) connect() *sql.DB {
-	dbs, err := sql.Open("mysql", db.dcs())
+func (db *DBConfig) connect(connectionType string) *sql.DB {
+	dbs, err := sql.Open(toLower(connectionType), db.dcs(toLower(connectionType)))
 	if err != nil {
 		fmt.Printf("Error %s when opening DB\n", err)
 		log.Fatalln(err)
 	}
 	setLimits(dbs)
 	return dbs
+}
+func toLower(str string) string {
+	return strings.ToLower(str)
 }
 
 func setLimits(db *sql.DB) {
@@ -56,7 +67,7 @@ func getList(rows *sql.Rows) []string {
 		var values string
 		err := rows.Scan(&values)
 		if err != nil {
-			fmt.Println("error to scan databases.")
+			fmt.Println("error to scan rows.")
 			fmt.Println(err)
 			return nil
 		}
@@ -107,15 +118,15 @@ func describeTable(rows *sql.Rows) *[]DescribeTable {
 func genQuery(db *sql.DB, query string) *sql.Rows {
 	res, err := db.Query(query)
 	if err != nil {
-		fmt.Printf("error to run query %s", query)
+		fmt.Printf("error to run query %s\n", query)
 		fmt.Println(err)
 		return nil
 	}
 	return res
 }
 
-func getDatabaseList(db *sql.DB) []string {
-	rows := genQuery(db, "SHOW DATABASES")
+func getDatabaseList(db *sql.DB, query string) []string {
+	rows := genQuery(db, query)
 	return getList(rows)
 
 }
@@ -130,18 +141,18 @@ func execute(db *sql.DB, query string) {
 }
 
 func useDB(db *sql.DB, dbName string) {
-	query := fmt.Sprintf("USE %s", dbName)
+	query := fmt.Sprintf("%s", dbName)
 	execute(db, query)
 }
 
-func getTableList(db *sql.DB, dbName string) []string {
-	useDB(db, dbName)
-	rows := genQuery(db, "SHOW TABLES")
+func getTableList(db *sql.DB, dbName, query, command string) []string {
+	useDB(db, command)
+	rows := genQuery(db, query)
 	return getList(rows)
 }
 
-func getTableInfo(db *sql.DB, tableName string) *Table {
-	rows := genQuery(db, "DESCRIBE "+tableName)
+func getTableInfo(db *sql.DB, tableName, query string) *Table {
+	rows := genQuery(db, query)
 	// tables := describeTable(rows)
 	return &Table{
 		TableName:     tableName,
@@ -173,14 +184,25 @@ func main() {
 		log.Fatal("Error loading .env file -> ", err)
 		return
 	}
-	db := loadEnv().connect()
+	dbType := "mysql"
+	db := loadEnv().connect(dbType)
 	// nbj := []NearByJobs{}
-	databases := getDatabaseList(db)
-	tables := getTableList(db, databases[13])
-	fmt.Println(databases[13])
+	// dblists := fmt.Sprintf("SELECT datname FROM pg_database;")
+	dbLists := fmt.Sprint("SHOW DATABASES")
+	databases := getDatabaseList(db, dbLists)
+	log.Println(databases)
+	// use := fmt.Sprintf("SET search_path TO  %s;", databases[11])
+	choosedDB := databases[3]
+	use := fmt.Sprintf("USE %s", choosedDB)
+	// showTables := fmt.Sprintf("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema';")
+	showTables := fmt.Sprintf("SHOW TABLES")
+	tables := getTableList(db, choosedDB, showTables, use)
+	fmt.Println(choosedDB)
 	for _, table := range tables {
 		// fmt.Printf("TABLE %s %s\n", FormatingInfo(databases[13], "-"), table)
-		tableinfo := getTableInfo(db, table)
+		// query := fmt.Sprintf("SELECT column_name,data_type,is_nullable,is_identity,column_default,ordinal_position FROM information_schema.columns WHERE table_name = '%s'", table)
+		query := fmt.Sprintf("DESCRIBE %s", table)
+		tableinfo := getTableInfo(db, table, query)
 		log.Println(tableinfo)
 		fmt.Println()
 		fmt.Println()
