@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -178,35 +179,70 @@ func FormatingInfo(database, formatter string) string {
 	return iterate(len(database), formatter)
 }
 
-func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file -> ", err)
-		return
-	}
-	dbType := "mysql"
-	db := loadEnv().connect(dbType)
-	// nbj := []NearByJobs{}
-	// dblists := fmt.Sprintf("SELECT datname FROM pg_database;")
-	dbLists := fmt.Sprint("SHOW DATABASES")
-	databases := getDatabaseList(db, dbLists)
-	log.Println(databases)
-	// use := fmt.Sprintf("SET search_path TO  %s;", databases[11])
+// MYSQL runs statements over mysql database
+func MYSQL(db *sql.DB, databases []string) {
 	choosedDB := databases[3]
 	use := fmt.Sprintf("USE %s", choosedDB)
-	// showTables := fmt.Sprintf("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema';")
 	showTables := fmt.Sprintf("SHOW TABLES")
 	tables := getTableList(db, choosedDB, showTables, use)
 	fmt.Println(choosedDB)
 	for _, table := range tables {
-		// fmt.Printf("TABLE %s %s\n", FormatingInfo(databases[13], "-"), table)
-		// query := fmt.Sprintf("SELECT column_name,data_type,is_nullable,is_identity,column_default,ordinal_position FROM information_schema.columns WHERE table_name = '%s'", table)
 		query := fmt.Sprintf("DESCRIBE %s", table)
 		tableinfo := getTableInfo(db, table, query)
 		log.Println(tableinfo)
 		fmt.Println()
 		fmt.Println()
 	}
+}
 
-	defer db.Close()
+// PSQL runs statements over postgres database
+func PSQL(db *sql.DB, databases []string) {
+	choosedDB := databases[3]
+	use := fmt.Sprintf("SET search_path TO  %s;", databases[11])
+	showTables := fmt.Sprintf("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema';")
+	tables := getTableList(db, choosedDB, showTables, use)
+	fmt.Println(choosedDB)
+	for _, table := range tables {
+		// fmt.Printf("TABLE %s %s\n", FormatingInfo(databases[13], "-"), table)
+		query := fmt.Sprintf("SELECT column_name,data_type,is_nullable,is_identity,column_default,ordinal_position FROM information_schema.columns WHERE table_name = '%s'", table)
+		tableinfo := getTableInfo(db, table, query)
+		log.Println(tableinfo)
+		fmt.Println()
+		fmt.Println()
+	}
+}
+
+func main() {
+	mysql := flag.Bool("mysql", false, "enable the flag to activate mysql database")
+	psql := flag.Bool("psql", false, "enable the flag to activate postgres database")
+	flag.Parse()
+
+	if !*mysql && !*psql {
+		flag.CommandLine.Usage()
+		log.Fatalln("flags empty")
+	}
+
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file -> ", err)
+		return
+	}
+	if !*mysql {
+		dbType := "postgres"
+		dbLists := fmt.Sprintf("SELECT datname FROM pg_database;")
+		db := loadEnv().connect(dbType)
+		databases := getDatabaseList(db, dbLists)
+		log.Println(databases)
+		PSQL(db, databases)
+		defer db.Close()
+	}
+	if !*psql {
+		dbType := "mysql"
+		dbLists := fmt.Sprint("SHOW DATABASES")
+		db := loadEnv().connect(dbType)
+		databases := getDatabaseList(db, dbLists)
+		log.Println(databases)
+		MYSQL(db, databases)
+		defer db.Close()
+	}
 }
